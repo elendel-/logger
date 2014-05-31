@@ -5,3 +5,4 @@ public import std.logger.stdiologger;
 public import std.logger.filelogger;
 public import std.logger.nulllogger;
 public import std.logger.multilogger;
+public import std.logger.tracer;
