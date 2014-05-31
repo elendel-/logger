@@ -1,5 +1,4 @@
-/**
-Implements logging facilities.
+/** Implements logging facilities.
 
 Message logging is a common approach to expose runtime information of a
 program. Logging should be easy, but also flexible and powerful, therefore $(D D)
@@ -328,7 +327,10 @@ private string buildLogFunction(const bool asMemberFunction,
 {
     string ret = genDocComment(asMemberFunction, asConditional, asPrintf, lv,
         specificLogLevel);
+
+    // Method signature
     ret ~= asMemberFunction ? "Logger " : "public ref Logger ";
+
     if (lv != LogLevel.unspecific)
     {
         ret ~= logLevelToFuncNameString(lv);
@@ -337,15 +339,19 @@ private string buildLogFunction(const bool asMemberFunction,
     {
         ret ~= "log";
     }
-
     ret ~= asPrintf ? "f(" : "(";
+
+    string context = q{
+        int line = __LINE__,
+        string file = __FILE__,
+        string funcName = __FUNCTION__,
+        string prettyFuncName = __PRETTY_FUNCTION__,
+        string moduleName = __MODULE__};
 
     if (asPrintf)
     {
-        ret ~= q{int line = __LINE__, string file = __FILE__, string funcName
-            = __FUNCTION__, string prettyFuncName = __PRETTY_FUNCTION__,
-            string moduleName = __MODULE__, A...)(};
-
+        ret ~= context;
+        ret ~= ", A...)(";
         ret ~= specificLogLevel ? "const LogLevel logLevel, " : "";
 
         if (asConditional)
@@ -362,142 +368,80 @@ private string buildLogFunction(const bool asMemberFunction,
         {
             ret ~= "bool cond, ";
         }
-        ret ~= q{string msg = "", int line = __LINE__, string file =
-            __FILE__, string funcName = __FUNCTION__, string prettyFuncName
-             = __PRETTY_FUNCTION__, string moduleName = __MODULE__};
+        ret ~= "string msg = \"\",";
+        ret ~= context;
     }
 
     ret ~= ") @trusted {\n";
+
+
+    // Body
+    string logger = asMemberFunction ? "this" : "LogManager.defaultLogger";
+    string logLevel = specificLogLevel ? "logLevel" : logLevelToParameterString(lv);
 
     if (!specificLogLevel && (lv == LogLevel.trace || lv == LogLevel.info ||
             lv == LogLevel.warning || lv == LogLevel.critical || lv ==
             LogLevel.fatal))
     {
-        ret ~= "\tversion(" ~ logLevelToDisable(lv) ~
-            ")\n\t{\n\t}\n\telse\n\t{\n";
+        ret ~= "  version(" ~ logLevelToDisable(lv) ~") {}\n";
+        ret ~= "  else {\n";
     }
+
+
+    string condition = asConditional ? "cond" : "true";
+    if (specificLogLevel || lv != LogLevel.unspecific)
+    {
+        if (asMemberFunction)
+        {
+            condition ~= " && " ~ logLevel ~ " >= this.logLevel";
+        }
+        condition ~= " && " ~ logLevel ~ " >= LogManager.globalLogLevel";
+    }
+
+
+    ret ~= "    if (" ~ condition ~ ") {\n";
 
     if (asMemberFunction)
     {
-        if (asConditional && lv == LogLevel.unspecific)
-        {
-            ret ~= "\tif(cond) {\n\t";
-        }
-        else if (asConditional && lv != LogLevel.unspecific)
-        {
-            ret ~= "\tif(cond && " ~ logLevelToParameterString(lv) ~
-                " >= this.logLevel && " ~ logLevelToParameterString(lv) ~
-                " >= LogManager.globalLogLevel) {\n\t";
-        }
-        else if (asConditional && specificLogLevel)
-        {
-            ret ~= "\tif(cond && logLevel >= this.logLevel && logLevel >= " ~
-                "LogManager.globalLogLevel) {\n\t";
-        }
-        else if (!asConditional && lv != LogLevel.unspecific)
-        {
-            ret ~= "\tif(" ~ logLevelToParameterString(lv) ~
-                " >= this.logLevel && " ~ logLevelToParameterString(lv) ~
-                " >= LogManager.globalLogLevel) {\n\t";
-        }
-        else if (!asConditional && specificLogLevel)
-        {
-            ret ~= "\tif(logLevel >= this.logLevel && logLevel >= " ~
-                "LogManager.globalLogLevel) {\n\t";
-        }
-        ret ~= "\tthis.logMessage(file, line, funcName, prettyFuncName, " ~
-            "moduleName, ";
-        if (specificLogLevel)
-        {
-            ret ~= "logLevel, ";
-        }
-        else
-        {
-            ret ~= lv == LogLevel.unspecific ? "this.logLevel_, " :
-                logLevelToParameterString(lv) ~ ", ";
-        }
+        ret ~= "      this.logMessage(file, line, funcName, prettyFuncName, moduleName, ";
+
+        ret ~= (lv == LogLevel.unspecific) ? "this.logLevel_" : logLevel;
+        ret ~= ", ";
 
         ret ~= asConditional ? "cond, " : "true, ";
-        ret ~= asPrintf ? "format(msg, a));\n" : "msg);\n";
-        if (asConditional || lv != LogLevel.unspecific || specificLogLevel)
-        {
-            if (lv == LogLevel.fatal)
-            {
-                ret ~= "\t\tthis.fatalLogger();\n";
-            }
-            ret ~= "\t}\n";
-        }
+        ret ~= asPrintf ? "format(msg, a)" : "msg";
+        ret ~= ");\n";
     }
     else // !asMemberFunction
     {
-        if (asConditional && lv == LogLevel.unspecific)
-        {
-            ret ~= "\tif (cond) {\n\t";
-        }
-        else if (asConditional && lv != LogLevel.unspecific)
-        {
-            ret ~= "\tif (cond && " ~ logLevelToParameterString(lv) ~ " >= " ~
-                "LogManager.globalLogLevel) {\n\t";
-        }
-        else if (asConditional && specificLogLevel)
-        {
-            ret ~= "\tif (cond && logLevel >= LogManager.globalLogLevel) {\n\t";
-        }
-        else if (!asConditional && lv != LogLevel.unspecific)
-        {
-            ret ~= "\tif (" ~ logLevelToParameterString(lv) ~ " >= " ~
-                "LogManager.globalLogLevel) {\n\t";
-        }
-        else if (!asConditional && specificLogLevel)
-        {
-            ret ~= "\tif (logLevel >= LogManager.globalLogLevel) {\n\t";
-        }
+        ret ~= "      LogManager.defaultLogger.log(";
 
-        ret ~= "\tLogManager.defaultLogger.log(";
-
-        if (specificLogLevel)
-        {
-            ret ~= "logLevel, ";
-        }
-        else
-        {
-            ret ~= lv == LogLevel.unspecific ?
-                "LogManager.defaultLogger.logLevel, " :
-                logLevelToParameterString(lv) ~ ", ";
-        }
+        ret ~= (lv == LogLevel.unspecific) ? "LogManager.defaultLogger.logLevel" : logLevel;
+        ret ~= ", ";
 
         ret ~= asConditional ? "cond, " : "true, ";
         ret ~= asPrintf ? "format(msg, a), " : "msg, ";
         ret ~= "line, file, funcName, prettyFuncName, moduleName);\n";
-
-        if (asConditional || lv != LogLevel.unspecific || specificLogLevel)
-        {
-            if (lv == LogLevel.fatal)
-            {
-                ret ~= "\t\tLogManager.defaultLogger.fatalLogger();\n";
-            }
-            ret ~= "\t}\n";
-        }
     }
+
+    if (lv == LogLevel.fatal)
+    {
+        ret ~= logger ~ ".fatalLogger();\n";
+    }
+
+    ret ~= "    }\n"; // if
 
     if (!specificLogLevel && (
             lv == LogLevel.trace || lv == LogLevel.info ||
             lv == LogLevel.warning || lv == LogLevel.critical ||
             lv == LogLevel.fatal))
     {
-        ret ~= "\t}\n";
+        ret ~= "  }\n";
     }
 
-    if (asMemberFunction)
-    {
-        ret ~= "\treturn this;";
-        ret ~= "\n}\n";
-    }
-    else
-    {
-        ret ~= "\treturn LogManager.defaultLogger;";
-        ret ~= "\n}\n";
-    }
+    ret ~= "  return " ~ logger ~ ";\n";
+    ret ~= "}\n";
+
     return ret;
 }
 
@@ -577,7 +521,8 @@ struct Tracer {
     }
 }
 
-/**
+
+/** Enumeration of valid logging levels.
 There are eight usable logging level. These level are $(I all), $(I trace),
 $(I info), $(I warning), $(I error), $(I critical), $(I fatal), and $(I off).
 If a log function with $(D LogLevel.fatal) is called the shutdown handler of
